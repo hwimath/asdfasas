@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>비행기 슈팅 게임</title>
+  <style>
+    /* 게임 화면 전체 설정 */
+    body {
+      margin: 0; overflow: hidden; background: #000;
+      display: flex; justify-content: center; align-items: center; height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+    #game-container {
+      position: relative; width: 400px; height: 600px;
+      background: url('assets/images/background.png') no-repeat center/cover;
+      border: 2px solid #333; overflow: hidden;
+    }
+    /* 스프라이트(이미지) 크기 조절 */
+    #player { position: absolute; width: 50px; height: 50px; bottom: 20px; left: 175px; }
+    .enemy { position: absolute; width: 40px; height: 40px; }
+    .missile { position: absolute; width: 5px; height: 15px; }
+    .item { position: absolute; width: 20px; height: 20px; border-radius: 50%; }
+    /* 상태 표시 */
+    #status-bar, #score {
+      position: absolute; color: #fff; font-size: 14px;
+    }
+    #status-bar { top: 10px; left: 10px; }
+    #health-bar { width: 100px; height: 10px; background: #333; margin-top: 2px; }
+    #health-fill { width: 100%; height: 100%; background: #2ecc71; }
+    #power-level { margin-top: 4px; }
+    #score { top: 10px; right: 10px; }
+    /* 시작 / 게임오버 화면 */
+    .overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.8); color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 10;
+    }
+    .overlay button {
+      margin-top: 20px; padding: 8px 16px; font-size: 16px;
+      background: #3498db; color: #fff; border: none; border-radius: 4px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <!-- 이미지 요소: JS에서 src 속성만 바꾸면 됩니다 -->
+    <img id="player" src="assets/images/player.png" alt="플레이어">
+    <!-- 상태바 -->
+    <div id="status-bar">
+      체력:
+      <div id="health-bar"><div id="health-fill"></div></div>
+      <div id="power-level">파워 레벨: 1</div>
+    </div>
+    <div id="score">점수: 0</div>
+
+    <!-- 시작 화면 -->
+    <div id="start-screen" class="overlay">
+      <h2>비행기 슈팅 게임</h2>
+      <p>← → ↑ ↓로 이동, 스페이스바로 발사</p>
+      <button id="start-btn">게임 시작</button>
+    </div>
+
+    <!-- 게임오버 화면 -->
+    <div id="game-over" class="overlay" style="display:none;">
+      <h2>게임 오버!</h2>
+      <p id="final-score">점수: 0</p>
+      <button id="restart-btn">다시 시작</button>
+    </div>
+  </div>
+
+  <!-- 배경음악 자동 재생 -->
+  <audio id="bgm" src="assets/audio/bgm.m4a" loop autoplay></audio>
+
+  <script>
+    // --- 기본 변수 선언 ---
+    const gc = document.getElementById('game-container');
+    const player = document.getElementById('player');
+    const healthFill = document.getElementById('health-fill');
+    const powerLevel = document.getElementById('power-level');
+    const scoreEl = document.getElementById('score');
+    const startScreen = document.getElementById('start-screen');
+    const startBtn = document.getElementById('start-btn');
+    const gameOverScreen = document.getElementById('game-over');
+    const restartBtn = document.getElementById('restart-btn');
+    let keys = {}, gameRunning=false;
+    let health=100, power=1, score=0;
+    let enemies=[], playerMissiles=[], enemyMissiles=[], items=[];
+    let loopId, spawnId, itemId;
+
+    // --- 이벤트 설정 ---
+    document.addEventListener('keydown', e => { keys[e.key]=true; if(e.key===' '&&gameRunning) fire(); });
+    document.addEventListener('keyup',   e => { keys[e.key]=false; });
+
+    startBtn.onclick = startGame;
+    restartBtn.onclick = () => { gameOverScreen.style.display='none'; startGame(); };
+
+    // --- 게임 시작 ---
+    function startGame(){
+      // 초기화
+      health=100; power=1; score=0;
+      clearAll();
+      updateStatus();
+      startScreen.style.display='none';
+      gameRunning=true;
+      // 루프 & 스폰 시작
+      loopId = setInterval(loop, 20);
+      spawnId = setInterval(spawnEnemy, 1500);
+      itemId  = setInterval(spawnItem, 5000);
+    }
+
+    // --- 메인 루프 ---
+    function loop(){
+      movePlayer(); moveMissiles(); moveEnemies(); moveEnemyMissiles(); moveItems();
+      checkCollisions();
+    }
+
+    // --- 플레이어 이동 ---
+    function movePlayer(){
+      let x = player.offsetLeft, y = player.offsetTop;
+      const speed=5;
+      if(keys.ArrowLeft && x>0) x-=speed;
+      if(keys.ArrowRight && x<gc.clientWidth-player.clientWidth) x+=speed;
+      if(keys.ArrowUp && y>0) y-=speed;
+      if(keys.ArrowDown && y<gc.clientHeight-player.clientHeight) y+=speed;
+      player.style.left=x+'px'; player.style.top=y+'px';
+    }
+
+    // --- 미사일 발사 ---
+    function fire(){
+      const px=player.offsetLeft, py=player.offsetTop;
+      const create= (ox)=>{ let m=document.createElement('div'); m.className='missile'; m.style.left=px+ox+'px'; m.style.top=py+'px'; gc.appendChild(m); playerMissiles.push(m); };
+      if(power===1) create(player.clientWidth/2-2.5);
+      else if(power===2){ create(10); create(player.clientWidth-15); }
+      else { create(player.clientWidth/2-2.5); create(5); create(player.clientWidth-10); }
+    }
+
+    // --- 미사일 이동 ---
+    function moveMissiles(){
+      playerMissiles.forEach((m,i)=>{ let t=m.offsetTop-8; if(t<0){ m.remove(); playerMissiles.splice(i,1); } else m.style.top=t+'px'; });
+    }
+
+    // --- 적 생성/이동 ---
+    function spawnEnemy(){
+      if(!gameRunning) return;
+      let e=document.createElement('img');
+      e.src = Math.random()<0.5 ? 'assets/images/enemy1.png' : 'assets/images/enemy2.png';
+      e.className='enemy'; e.style.left = Math.random()*(gc.clientWidth-40)+'px'; e.style.top='0px';
+      gc.appendChild(e);
+      enemies.push({el:e, fire:Math.random()*2000+500});
+    }
+    function moveEnemies(){
+      enemies.forEach((en,i)=>{
+        let t = en.el.offsetTop+2;
+        if(t>gc.clientHeight){ en.el.remove(); enemies.splice(i,1); }
+        else{ en.el.style.top=t+'px'; en.fire-=20; if(en.fire<=0){ fireEnemy(en.el); en.fire=1500; } }
+      });
+    }
+
+    // --- 적 미사일 ---
+    function fireEnemy(el){
+      let m=document.createElement('div'); m.className='missile';
+      m.style.left=el.offsetLeft+el.clientWidth/2-2.5+'px';
+      m.style.top=el.offsetTop+el.clientHeight+'px';
+      gc.appendChild(m); enemyMissiles.push(m);
+    }
+    function moveEnemyMissiles(){
+      enemyMissiles.forEach((m,i)=>{
+        let t = m.offsetTop+5;
+        if(t>gc.clientHeight){ m.remove(); enemyMissiles.splice(i,1); }
+        else m.style.top=t+'px';
+      });
+    }
+
+    // --- 아이템 생성/이동 ---
+    function spawnItem(){
+      if(!gameRunning) return;
+      let it=document.createElement('img');
+      if(Math.random()<0.5){ it.src='assets/images/item1.png'; it.className='item'; }
+      else{ it.src='assets/images/item2.png'; it.className='item'; }
+      it.style.left=Math.random()*(gc.clientWidth-20)+'px'; it.style.top='0px';
+      gc.appendChild(it); items.push(it);
+    }
+    function moveItems(){
+      items.forEach((it,i)=>{
+        let t=it.offsetTop+3;
+        if(t>gc.clientHeight){ it.remove(); items.splice(i,1); }
+        else it.style.top=t+'px';
+      });
+    }
+
+    // --- 충돌 검사 ---
+    function checkCollisions(){
+      const pr = player.getBoundingClientRect();
+      // 플레이어 미사일 vs 적
+      playerMissiles.forEach((m,mi)=>{
+        const mr = m.getBoundingClientRect();
+        enemies.forEach((en,ei)=>{
+          if(collide(mr,en.el.getBoundingClientRect())){
+            m.remove(); playerMissiles.splice(mi,1);
+            en.el.remove(); enemies.splice(ei,1);
+            score+=10; updateStatus();
+          }
+        });
+      });
+      // 적 미사일 vs 플레이어
+      enemyMissiles.forEach((m,i)=>{
+        if(collide(m.getBoundingClientRect(), pr)){
+          m.remove(); enemyMissiles.splice(i,1);
+          health-=10; if(health<0) health=0; updateStatus();
+          if(health===0) endGame();
+        }
+      });
+      // 아이템 vs 플레이어
+      items.forEach((it,i)=>{
+        if(collide(it.getBoundingClientRect(), pr)){
+          if(it.src.includes('item1')){ if(power<3) power++; }
+          else { health = Math.min(100, health+20); }
+          it.remove(); items.splice(i,1); updateStatus();
+        }
+      });
+    }
+    function collide(a,b){
+      return !(a.right<b.left||a.left>b.right||a.bottom<b.top||a.top>b.bottom);
+    }
+
+    // --- 상태 업데이트 & 게임오버 ---
+    function updateStatus(){
+      healthFill.style.width = health+'%';
+      if(health>60) healthFill.style.background='#2ecc71';
+      else if(health>30) healthFill.style.background='#f1c40f';
+      else healthFill.style.background='#e74c3c';
+      powerLevel.textContent = '파워 레벨: '+power;
+      scoreEl.textContent = '점수: '+score;
+    }
+    function endGame(){
+      gameRunning=false;
+      clearInterval(loopId); clearInterval(spawnId); clearInterval(itemId);
+      document.getElementById('final-score').textContent = '점수: '+score;
+      gameOverScreen.style.display='flex';
+    }
+
+    // --- 초기화 ---
+    function clearAll(){
+      [enemies, playerMissiles, enemyMissiles, items].forEach(arr=>arr.forEach(el=>el.el?el.el.remove():el.remove()));
+      enemies=[]; playerMissiles=[]; enemyMissiles=[]; items=[];
+    }
+  </script>
+</body>
+</html>
